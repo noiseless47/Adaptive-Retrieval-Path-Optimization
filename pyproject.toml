@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arpo"
+version = "0.1.0"
+description = "Adaptive Retrieval Path Optimization using Dynamic Query Graphs for multi-hop information retrieval."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "ARPO Research Team" }
+]
+keywords = [
+  "information-retrieval",
+  "rag",
+  "multi-hop-retrieval",
+  "query-graphs",
+  "adaptive-retrieval"
+]
+dependencies = []
+
+[project.optional-dependencies]
+api = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27"
+]
+ml = [
+  "sentence-transformers>=3.0",
+  "spacy>=3.7",
+  "networkx>=3.2",
+  "rank-bm25>=0.2.2"
+]
+eval = [
+  "beir>=2.0.0"
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5"
+]
+all = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "sentence-transformers>=3.0",
+  "spacy>=3.7",
+  "networkx>=3.2",
+  "rank-bm25>=0.2.2",
+  "beir>=2.0.0",
+  "pytest>=8.0",
+  "ruff>=0.5"
+]
+
+[project.scripts]
+arpo = "arpo.cli:main"
+arpo-evaluate = "arpo.eval_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

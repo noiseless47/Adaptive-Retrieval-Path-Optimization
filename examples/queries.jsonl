@@ -1,0 +1,3 @@
+{"id":"q-med-transformer-efficiency","query":"Papers where transformers replaced CNNs in medical imaging while reducing inference cost","relevant_ids":["paper-001","paper-002"],"graded_relevance":{"paper-002":3,"paper-001":3}}
+{"id":"q-graph-hallucination","query":"How do graph retrieval systems reduce hallucination in multi-hop QA?","relevant_ids":["paper-004","paper-005","paper-006"],"graded_relevance":{"paper-004":3,"paper-006":2,"paper-005":2}}
+{"id":"q-adaptive-routing","query":"Adaptive query decomposition for ambiguous complex search","relevant_ids":["paper-006","paper-004"],"graded_relevance":{"paper-006":3,"paper-004":2}}
