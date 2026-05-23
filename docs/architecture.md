@@ -62,12 +62,23 @@ Low-confidence branches are pruned before final reranking.
 
 | Interface | Prototype | Research/Production Adapter |
 | --- | --- | --- |
-| Dense retrieval | deterministic hashing | BGE, Contriever, E5, Instructor |
+| Dense retrieval | persistent hash embedding index | BGE, Contriever, E5, Instructor through SentenceTransformers |
 | Graph expansion | metadata links | Neo4j, NetworkX, citation graph |
 | Reranking | deterministic adaptive scoring | CrossEncoder, MonoT5, ColBERT |
 | Query analysis | heuristics | transformer classifier |
 | Answering | extractive synthesis | Mistral, Llama, Phi |
 | Evaluation | local metrics | BEIR, HotpotQA, MuSiQue, SciFact |
+
+## Dense Retrieval And Indexing
+
+The dense retrieval layer is backend-driven. The default backend is a deterministic hash embedder, which keeps local tests fast and dependency-free. The same index interface can use SentenceTransformers by setting:
+
+```powershell
+$env:ARPO_EMBEDDING_BACKEND="sentence-transformers"
+$env:ARPO_EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"
+```
+
+Vector indexes are fingerprinted by corpus content, backend, model id, and dimensionality. Stale indexes are ignored automatically, and fresh indexes are written to `data/vector-indexes` unless `ARPO_VECTOR_INDEX_DIR` overrides it.
 
 ## Ablation Plan
 

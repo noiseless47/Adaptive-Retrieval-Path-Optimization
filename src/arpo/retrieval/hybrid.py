@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from arpo.models import QueryGraph, RetrievalCandidate, RetrievalStrategy
 from arpo.retrieval.corpus import Corpus
-from arpo.retrieval.dense import HashDenseRetriever
+from arpo.retrieval.dense import DenseRetriever
 from arpo.retrieval.sparse import BM25Retriever
 from arpo.text import lexical_overlap, normalize_score, tokenize
 
@@ -15,7 +15,7 @@ class HybridRetriever:
     def __init__(self, corpus: Corpus):
         self.corpus = corpus
         self.sparse = BM25Retriever(corpus)
-        self.dense = HashDenseRetriever(corpus)
+        self.dense = DenseRetriever(corpus)
 
     def retrieve(self, graph: QueryGraph, strategy: RetrievalStrategy) -> list[RetrievalCandidate]:
         fused: dict[tuple[str, str], dict[str, object]] = {}
@@ -184,3 +184,7 @@ class HybridRetriever:
             for rank, candidate in enumerate(merged, start=1)
         ]
 
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "dense": self.dense.diagnostics(),
+        }

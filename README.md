@@ -58,6 +58,21 @@ PDF ingestion requires the optional extra:
 pip install -e .[ingestion]
 ```
 
+Prebuild a persistent dense vector index:
+
+```powershell
+python -m arpo.index_cli --corpus data/my-paper-notes.jsonl --index-dir data/vector-indexes
+```
+
+By default ARPO uses a deterministic local hash embedding backend so the project runs without downloading ML models. To activate real SentenceTransformers embeddings:
+
+```powershell
+pip install -e .[ml]
+$env:ARPO_EMBEDDING_BACKEND="sentence-transformers"
+$env:ARPO_EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"
+python -m arpo.index_cli --corpus data/my-paper-notes.jsonl --backend sentence-transformers
+```
+
 For JSON output:
 
 ```powershell
@@ -182,6 +197,7 @@ The repository includes:
 - FastAPI dependency declarations in `pyproject.toml`
 - upload validation, path sandboxing, generic server errors, and configurable CORS
 - raw corpus ingestion for `.txt`, `.md`, `.json`, `.jsonl`, and optional `.pdf` sources
+- persistent vector indexes with configurable hash or SentenceTransformers embedding backends
 - API endpoint tests for health, search, path rejection, and ablation
 - frontend lint/build checks
 - GitHub Actions CI in `.github/workflows/ci.yml`
@@ -215,6 +231,10 @@ Useful production environment variables:
 | `ARPO_FRONTEND_DIST` | Built frontend directory to serve from FastAPI |
 | `ARPO_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `ARPO_MAX_UPLOAD_BYTES` | Maximum accepted corpus upload size |
+| `ARPO_EMBEDDING_BACKEND` | `hash` by default, or `sentence-transformers` for real embedding models |
+| `ARPO_EMBEDDING_MODEL` | SentenceTransformers model id, default `BAAI/bge-small-en-v1.5` |
+| `ARPO_VECTOR_INDEX_DIR` | Directory for persistent vector index files |
+| `ARPO_VECTOR_CACHE` | Set to `0` to disable vector index caching |
 
 ## Example Python Usage
 

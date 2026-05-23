@@ -67,8 +67,10 @@ class PipelineDiagnosticsTests(unittest.TestCase):
 
         self.assertIn("latency_ms", result.diagnostics)
         self.assertIn("stage_timings_ms", result.diagnostics)
+        self.assertIn("retriever", result.diagnostics)
         self.assertGreaterEqual(result.diagnostics["latency_ms"], 0)
         self.assertTrue(result.diagnostics["query_graph_enabled"])
+        self.assertEqual(result.diagnostics["retriever"]["dense"]["embedding_backend"], "hash")
 
 
 if __name__ == "__main__":

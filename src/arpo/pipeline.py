@@ -125,6 +125,7 @@ class ARPOPipeline:
                 "latency_ms": _elapsed_ms(total_start),
                 "stage_timings_ms": timings,
                 "query_graph_enabled": not disable_query_graph,
+                "retriever": self.retriever.diagnostics(),
             },
         )
 

@@ -15,6 +15,7 @@ build/
 .env.*
 data/raw/
 data/processed/
+data/vector-indexes/
 models/
 *.sqlite
 *.db
