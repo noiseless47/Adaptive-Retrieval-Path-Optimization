@@ -12,8 +12,8 @@ query -> complexity analysis -> query graph -> adaptive retrieval plan
 
 This repository is intentionally built in two layers:
 
-- **Runnable core:** pure Python, no required external services, deterministic behavior for tests and ablations.
-- **Research adapters:** clean extension points for FastAPI, sentence-transformers, Qdrant, Neo4j, CrossEncoder rerankers, and BEIR-style evaluation.
+- **Runnable core/API:** deterministic Python retrieval pipeline with a FastAPI service for UI and experiment access.
+- **Research adapters:** clean extension points for sentence-transformers, Qdrant, Neo4j, CrossEncoder rerankers, and BEIR-style evaluation.
 
 ## Why ARPO Is Different
 
@@ -40,16 +40,33 @@ Run the demo query against the included mini corpus:
 python -m arpo.cli --query "Papers where transformers replaced CNNs in medical imaging while reducing inference cost" --corpus examples/corpus.jsonl
 ```
 
+Build a larger local corpus from raw notes, markdown, JSON, JSONL, or PDFs:
+
+```powershell
+python -m arpo.ingest_cli .\docs\my-paper-notes.md .\data\my-paper-notes.jsonl --chunk-words 220 --overlap-words 45
+```
+
+Then search it:
+
+```powershell
+python -m arpo.cli --query "graph retrieval confidence pruning" --corpus data/my-paper-notes.jsonl
+```
+
+PDF ingestion requires the optional extra:
+
+```powershell
+pip install -e .[ingestion]
+```
+
 For JSON output:
 
 ```powershell
 python -m arpo.cli --query "How do graph retrieval systems reduce hallucination in multi-hop QA?" --corpus examples/corpus.jsonl --json
 ```
 
-Install the API extras when you want the HTTP service:
+Run the HTTP service:
 
 ```powershell
-pip install -e ".[api]"
 uvicorn arpo.api.main:app --reload
 ```
 
@@ -63,12 +80,24 @@ POST /search
 }
 ```
 
+To ingest raw source material through the API:
+
+```http
+POST /corpora/ingest
+multipart/form-data:
+  file=<notes.md | papers.json | corpus.jsonl | paper.pdf>
+  chunk_words=220
+  overlap_words=45
+  min_chunk_chars=120
+```
+
 ## Project Layout
 
 ```text
 src/arpo/
   analysis/      query complexity routing
   graph/         dynamic query graph construction
+  ingestion/     raw text/JSON/PDF to ARPO JSONL chunks
   planning/      adaptive retrieval strategy selection
   retrieval/     sparse, dense, and hybrid retrieval
   evidence/      evidence dependency graph construction
@@ -103,6 +132,89 @@ Run the included mini evaluation set:
 ```powershell
 python -m arpo.eval_cli --queries examples/queries.jsonl --corpus examples/corpus.jsonl --top-k 3
 ```
+
+The bundled `examples/corpus.jsonl` is intentionally tiny. Use `arpo-ingest` or `/corpora/ingest` to create larger corpora before drawing conclusions from retrieval quality, pruning behavior, or ablation metrics.
+
+## Frontend
+
+ARPO Studio lives in `frontend/`.
+
+Start backend and frontend together:
+
+```powershell
+.\scripts\start-dev.ps1
+```
+
+To install backend API and frontend dependencies first:
+
+```powershell
+.\scripts\start-dev.ps1 -Install
+```
+
+Windows CMD shortcut:
+
+```cmd
+start-dev.cmd
+```
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/`. The UI proxies `/api/search`, `/api/evaluate`, and `/api/ablation` to the FastAPI backend at `http://127.0.0.1:8000`.
+
+For production-style frontend output:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+The backend can also serve the built frontend when `frontend/dist` exists, or when `ARPO_FRONTEND_DIST` points to a built asset directory.
+
+## Production And CI
+
+The repository includes:
+
+- FastAPI dependency declarations in `pyproject.toml`
+- upload validation, path sandboxing, generic server errors, and configurable CORS
+- raw corpus ingestion for `.txt`, `.md`, `.json`, `.jsonl`, and optional `.pdf` sources
+- API endpoint tests for health, search, path rejection, and ablation
+- frontend lint/build checks
+- GitHub Actions CI in `.github/workflows/ci.yml`
+- a multi-stage Dockerfile that builds ARPO Studio and serves it from the FastAPI app
+
+Run the full local verification suite:
+
+```powershell
+python -m compileall -q src tests
+python -m unittest discover -s tests -v
+python -m ruff check src tests
+cd frontend
+npm run lint
+npm run build
+```
+
+Build the production container:
+
+```powershell
+docker build -t arpo-studio .
+docker run --rm -p 8000:8000 arpo-studio
+```
+
+Useful production environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `ARPO_WORKSPACE_ROOT` | Root directory for allowed project-relative paths |
+| `ARPO_DATA_DIR` | Upload/read directory for user corpora |
+| `ARPO_EXAMPLES_DIR` | Read directory for bundled example corpora |
+| `ARPO_FRONTEND_DIST` | Built frontend directory to serve from FastAPI |
+| `ARPO_CORS_ORIGINS` | Comma-separated allowed browser origins |
+| `ARPO_MAX_UPLOAD_BYTES` | Maximum accepted corpus upload size |
 
 ## Example Python Usage
 

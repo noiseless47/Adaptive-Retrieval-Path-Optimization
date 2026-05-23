@@ -19,11 +19,16 @@ keywords = [
   "query-graphs",
   "adaptive-retrieval"
 ]
-dependencies = []
+dependencies = [
+  "fastapi>=0.110",
+  "python-multipart>=0.0.9",
+  "uvicorn[standard]>=0.27"
+]
 
 [project.optional-dependencies]
 api = [
   "fastapi>=0.110",
+  "python-multipart>=0.0.9",
   "uvicorn[standard]>=0.27"
 ]
 ml = [
@@ -32,21 +37,28 @@ ml = [
   "networkx>=3.2",
   "rank-bm25>=0.2.2"
 ]
+ingestion = [
+  "pypdf>=4.0"
+]
 eval = [
   "beir>=2.0.0"
 ]
 dev = [
+  "httpx>=0.27",
   "pytest>=8.0",
   "ruff>=0.5"
 ]
 all = [
   "fastapi>=0.110",
+  "python-multipart>=0.0.9",
   "uvicorn[standard]>=0.27",
   "sentence-transformers>=3.0",
   "spacy>=3.7",
   "networkx>=3.2",
   "rank-bm25>=0.2.2",
+  "pypdf>=4.0",
   "beir>=2.0.0",
+  "httpx>=0.27",
   "pytest>=8.0",
   "ruff>=0.5"
 ]
@@ -54,6 +66,7 @@ all = [
 [project.scripts]
 arpo = "arpo.cli:main"
 arpo-evaluate = "arpo.eval_cli:main"
+arpo-ingest = "arpo.ingest_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

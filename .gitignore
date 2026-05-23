@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.dev/
 .coverage
 htmlcov/
 .venv/
@@ -17,4 +18,3 @@ data/processed/
 models/
 *.sqlite
 *.db
-

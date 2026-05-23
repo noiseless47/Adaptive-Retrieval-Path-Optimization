@@ -14,6 +14,17 @@ USER QUERY
   -> Evidence-Grounded Answer Generator
 ```
 
+Corpus preparation runs before the live query path:
+
+```text
+RAW SOURCES
+  -> Source Loader (.txt/.md/.json/.jsonl/.pdf)
+  -> Chunker with overlap
+  -> Keyword/entity extraction
+  -> Chunk relation builder
+  -> ARPO JSONL corpus
+```
+
 ## Core Research Objects
 
 ### Query Analysis
@@ -27,6 +38,10 @@ The query graph represents the user query as dependent semantic intents. This le
 ### Retrieval Strategy
 
 The strategy planner decides sparse, dense, and graph weights, traversal depth, pruning threshold, and reranking policy.
+
+### Corpus Ingestion
+
+The ingestion layer converts larger source collections into ARPO's JSONL document contract. It preserves source metadata, creates overlapping chunks, extracts lightweight keywords/entities, and links adjacent or semantically related chunks through `related_ids`. This gives graph expansion something meaningful to traverse beyond the six-document demo corpus.
 
 ### Evidence Graph
 
@@ -61,4 +76,3 @@ Low-confidence branches are pruned before final reranking.
 3. **Pruning addition:** enable confidence-guided pruning.
 4. **Adaptive reranking addition:** enable query-type reranking policies.
 5. **Full ARPO:** graph routing + pruning + adaptive reranking.
-

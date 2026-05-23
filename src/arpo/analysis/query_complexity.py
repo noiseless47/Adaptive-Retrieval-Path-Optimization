@@ -102,6 +102,7 @@ class QueryComplexityAnalyzer:
                 "comparative": round(comparative, 3),
                 "causal": round(causal, 3),
                 "temporal": round(temporal, 3),
+                "multi_hop": round(multi_hop, 3),
                 "multi_hop_markers": connector_count,
                 "entity_pressure": entity_pressure,
                 "content_token_count": token_count,
