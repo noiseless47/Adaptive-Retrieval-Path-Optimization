@@ -66,6 +66,7 @@ all = [
 [project.scripts]
 arpo = "arpo.cli:main"
 arpo-evaluate = "arpo.eval_cli:main"
+arpo-harvest = "arpo.harvest_cli:main"
 arpo-ingest = "arpo.ingest_cli:main"
 arpo-index = "arpo.index_cli:main"
 

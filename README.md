@@ -46,6 +46,12 @@ Build a larger local corpus from raw notes, markdown, JSON, JSONL, or PDFs:
 python -m arpo.ingest_cli .\docs\my-paper-notes.md .\data\my-paper-notes.jsonl --chunk-words 220 --overlap-words 45
 ```
 
+Or harvest a starter scholarly corpus from OpenAlex across ARPO research topics:
+
+```powershell
+python -m arpo.harvest_cli --output data/arpo-openalex-corpus.jsonl --raw-output data/raw/openalex-works.jsonl --per-topic 50
+```
+
 Then search it:
 
 ```powershell
