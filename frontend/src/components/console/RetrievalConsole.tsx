@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useCorpora, useSearch } from '../../api/hooks';
+import { useCorpora, useQuerySuggestions, useSearch } from '../../api/hooks';
 import { useAppStore } from '../../store/app-store';
 import {
   BrainCircuit,
@@ -13,7 +13,10 @@ import {
 } from 'lucide-react';
 import { QueryAnalysisCard } from './QueryAnalysisCard';
 import { FieldLabel, SelectField, SelectOption, SliderField, TextAreaField } from '../ui/controls';
-import { displayLabel } from '../../utils/format';
+import { DEFAULT_CORPUS_PATH, corpusOptions as buildCorpusOptions, preferredCorpusPath } from '../../utils/corpora';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { QuerySuggestionPanel } from '../query/QuerySuggestionPanel';
+import { QuerySuggestion } from '../../types/api';
 
 const RETRIEVAL_MODES: SelectOption[] = [
   { label: 'Auto (Adaptive)', value: 'auto' },
@@ -40,27 +43,59 @@ export function RetrievalConsole() {
   const [mode, setMode] = useState('auto');
   const [policy, setPolicy] = useState('auto');
   const [threshold, setThreshold] = useState(0.45);
-  const [corpusPath, setCorpusPath] = useState('examples/corpus.jsonl');
+  const [corpusPath, setCorpusPath] = useState(DEFAULT_CORPUS_PATH);
 
   const corpusOptions = useMemo<SelectOption[]>(() => {
-    const corpora = corporaQuery.data?.corpora ?? [];
-    if (!corpora.length) {
-      return [{ label: 'Medical Imaging Demo', value: 'examples/corpus.jsonl' }];
-    }
-    return corpora.map((corpus) => ({
-      label: `${corpus.id.replace(/\.jsonl$/i, '')} - ${displayLabel(corpus.type)}`,
-      value: corpus.path,
-    }));
+    return buildCorpusOptions(corporaQuery.data?.corpora ?? []);
   }, [corporaQuery.data?.corpora]);
 
-  const selectedCorpusPath = corpusOptions.some((option) => option.value === corpusPath)
-    ? corpusPath
-    : corpusOptions[0]?.value ?? 'examples/corpus.jsonl';
+  const selectedCorpusPath = preferredCorpusPath(corporaQuery.data?.corpora ?? [], corpusPath);
+  const debouncedQuery = useDebouncedValue(query, 180);
+  const suggestionsQuery = useQuerySuggestions(debouncedQuery, selectedCorpusPath, 5);
+  const suggestions = suggestionsQuery.data?.suggestions ?? [];
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [appliedSuggestionText, setAppliedSuggestionText] = useState('');
+  const safeActiveSuggestionIndex = Math.min(activeSuggestionIndex, Math.max(suggestions.length - 1, 0));
 
   const handleRun = () => {
     if (!query.trim()) return;
     searchMutation.mutate({ query, top_k: topK, corpus_path: selectedCorpusPath });
   };
+
+  const handleQueryChange = (nextQuery: string) => {
+    setQuery(nextQuery);
+    setActiveSuggestionIndex(0);
+    setAppliedSuggestionText('');
+  };
+
+  const applySuggestion = (suggestion: QuerySuggestion) => {
+    setQuery(suggestion.text);
+    setActiveSuggestionIndex(0);
+    setAppliedSuggestionText(suggestion.text);
+  };
+
+  const handleSuggestionKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    if (!suggestions.length) return;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveSuggestionIndex((index) => (index + 1) % suggestions.length);
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveSuggestionIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+    }
+
+    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+      event.preventDefault();
+      applySuggestion(suggestions[safeActiveSuggestionIndex] ?? suggestions[0]);
+    }
+  };
+
+  const showSuggestions = query.trim().length >= 2
+    && query !== appliedSuggestionText
+    && (suggestions.length > 0 || suggestionsQuery.isFetching);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto text-sm custom-scrollbar">
@@ -82,11 +117,23 @@ export function RetrievalConsole() {
           <TextAreaField
             label="Query"
             value={query}
-            onChange={setQuery}
+            onChange={handleQueryChange}
+            onKeyDown={handleSuggestionKeyDown}
             icon={<ScanSearch size={13} />}
             valueLabel={`${query.trim().length} chars`}
-            placeholder="Enter research query..."
-          />
+            placeholder="Describe a retrieval mission..."
+          >
+            {showSuggestions && (
+              <QuerySuggestionPanel
+                suggestions={suggestions}
+                isLoading={suggestionsQuery.isFetching}
+                activeIndex={safeActiveSuggestionIndex}
+                onActiveIndex={setActiveSuggestionIndex}
+                onSelect={applySuggestion}
+                compact
+              />
+            )}
+          </TextAreaField>
           <button
             onClick={handleRun}
             disabled={!query.trim() || searchMutation.isPending}

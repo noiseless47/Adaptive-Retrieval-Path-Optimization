@@ -157,29 +157,37 @@ export function TextAreaField({
   label,
   value,
   onChange,
+  onKeyDown,
   placeholder,
   valueLabel,
   icon,
+  children,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
   placeholder?: string;
   valueLabel?: React.ReactNode;
   icon?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
-    <label className="block space-y-2">
-      <FieldLabel label={label} value={valueLabel} icon={icon} />
-      <TextareaAutosize
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        minRows={5}
-        maxRows={9}
-        className="arpo-input"
-      />
-    </label>
+    <div className="space-y-2">
+      <label className="block space-y-2">
+        <FieldLabel label={label} value={valueLabel} icon={icon} />
+        <TextareaAutosize
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          minRows={5}
+          maxRows={9}
+          className="arpo-input"
+        />
+      </label>
+      {children}
+    </div>
   );
 }
 

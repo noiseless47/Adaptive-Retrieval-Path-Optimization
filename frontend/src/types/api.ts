@@ -144,10 +144,23 @@ export const AblationReportSchema = z.object({
   results: z.array(AblationVariantSchema)
 });
 
+export const QuerySuggestionSchema = z.object({
+  text: z.string(),
+  kind: z.string(),
+  source: z.string(),
+  score: z.number(),
+  metadata: z.record(z.string(), z.any()).optional()
+});
+
+export const QuerySuggestionsResponseSchema = z.object({
+  suggestions: z.array(QuerySuggestionSchema)
+});
+
 export const CorpusInfoSchema = z.object({
   id: z.string(),
   path: z.string(),
-  type: z.string()
+  type: z.string(),
+  documents: z.number().optional()
 });
 
 export const CorporaResponseSchema = z.object({
@@ -158,5 +171,7 @@ export type EvaluationQueryReport = z.infer<typeof EvaluationQueryReportSchema>;
 export type EvaluationReport = z.infer<typeof EvaluationReportSchema>;
 export type AblationVariant = z.infer<typeof AblationVariantSchema>;
 export type AblationReport = z.infer<typeof AblationReportSchema>;
+export type QuerySuggestion = z.infer<typeof QuerySuggestionSchema>;
+export type QuerySuggestionsResponse = z.infer<typeof QuerySuggestionsResponseSchema>;
 export type CorpusInfo = z.infer<typeof CorpusInfoSchema>;
 export type CorporaResponse = z.infer<typeof CorporaResponseSchema>;

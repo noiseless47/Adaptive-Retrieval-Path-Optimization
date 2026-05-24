@@ -20,7 +20,7 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
 
-    from arpo.api.schemas import AblationRequest, EvaluateRequest, SearchRequest
+    from arpo.api.schemas import AblationRequest, EvaluateRequest, SearchRequest, SuggestRequest
     from arpo.evaluation.runner import evaluate_pipeline, load_query_records
 except ImportError as exc:  # pragma: no cover
     FastAPI = None
@@ -33,6 +33,7 @@ except ImportError as exc:  # pragma: no cover
     SearchRequest = None
     EvaluateRequest = None
     AblationRequest = None
+    SuggestRequest = None
     evaluate_pipeline = None
     load_query_records = None
     FASTAPI_IMPORT_ERROR = exc
@@ -139,6 +140,19 @@ def create_app() -> Any:
     def list_corpora() -> dict[str, Any]:
         return {"corpora": [*_list_corpora(EXAMPLES_DIR, "example"), *_list_corpora(DATA_DIR, "uploaded")]}
 
+    @app.get("/suggest")
+    def suggest(
+        q: str = "",
+        corpus_path: str = "data/arpo-openalex-corpus.jsonl",
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        try:
+            request = SuggestRequest(q=q, corpus_path=corpus_path, limit=limit)
+            corpus = Corpus.from_jsonl(_resolve_jsonl_path(request.corpus_path, must_exist=True))
+            return {"suggestions": _query_suggestions(corpus, request.q, request.limit)}
+        except Exception as exc:
+            _raise_http_error("suggest", exc)
+
     @app.post("/corpora/upload")
     async def upload_corpus(file: UploadFile = File(...)) -> dict[str, Any]:
         safe_name = _safe_upload_filename(file.filename)
@@ -207,6 +221,7 @@ def create_app() -> Any:
     app.post("/api/evaluate", include_in_schema=False)(evaluate)
     app.post("/api/ablation", include_in_schema=False)(ablation)
     app.get("/api/corpora", include_in_schema=False)(list_corpora)
+    app.get("/api/suggest", include_in_schema=False)(suggest)
     app.post("/api/corpora/upload", include_in_schema=False)(upload_corpus)
     app.post("/api/corpora/ingest", include_in_schema=False)(ingest_corpus)
 
@@ -388,15 +403,242 @@ def _dedupe_path(path: Path) -> Path:
     raise ValueError("Too many files with this corpus name already exist.")
 
 
-def _list_corpora(directory: Path, source_type: str) -> list[dict[str, str]]:
+def _query_suggestions(corpus: Corpus, query: str, limit: int) -> list[dict[str, Any]]:
+    normalized_query = _normalize_suggestion_text(query)
+    candidates: dict[str, dict[str, Any]] = {}
+    topic_stats: dict[str, dict[str, Any]] = {}
+
+    def add_candidate(
+        text: str,
+        *,
+        kind: str,
+        source: str,
+        priority: float,
+        metadata: dict[str, Any] | None = None,
+        match_text: str = "",
+    ) -> None:
+        suggestion_text = _clean_suggestion(text)
+        if len(suggestion_text) < 12:
+            return
+
+        match_score = _suggestion_match_score(normalized_query, f"{suggestion_text} {match_text}")
+        if normalized_query and match_score is None:
+            return
+
+        metadata = metadata or {}
+        score = priority + (match_score or 0.0)
+        key = suggestion_text.casefold()
+        current = candidates.get(key)
+        if current is None or score > current["score"]:
+            candidates[key] = {
+                "text": suggestion_text,
+                "kind": kind,
+                "source": source,
+                "score": round(score, 4),
+                "metadata": metadata,
+            }
+
+    for document in corpus.documents:
+        metadata = document.metadata
+        source = str(metadata.get("source", "Corpus"))
+        citations = _safe_number(metadata.get("cited_by_count"))
+
+        for raw_topic in (metadata.get("domain"), metadata.get("harvest_query")):
+            topic = _human_topic(raw_topic)
+            if not topic:
+                continue
+
+            topic_record = topic_stats.setdefault(topic, {"count": 0, "citations": 0.0})
+            topic_record["count"] += 1
+            topic_record["citations"] += citations
+
+        for concept in _iter_metadata_terms(metadata, "concepts", limit=5):
+            topic = _human_topic(concept)
+            if topic:
+                add_candidate(
+                    f"Surface high-confidence papers about {topic}",
+                    kind="concept",
+                    source=source,
+                    priority=18.0 + min(citations / 400.0, 6.0),
+                    metadata={"document_id": document.id},
+                    match_text=f"{document.title} {metadata.get('domain', '')}",
+                )
+
+        title = _clean_suggestion(document.title)
+        if title:
+            add_candidate(
+                f"Retrieve papers related to {title}",
+                kind="paper",
+                source=source,
+                priority=16.0 + min(citations / 300.0, 8.0),
+                metadata={"document_id": document.id, "year": metadata.get("year")},
+                match_text=f"{title} {metadata.get('domain', '')} {' '.join(_iter_metadata_terms(metadata, 'concepts', 6))}",
+            )
+
+    for topic, stats in topic_stats.items():
+        priority = 30.0 + min(float(stats["count"]), 18.0) + min(float(stats["citations"]) / 1200.0, 10.0)
+        add_candidate(
+            f"Trace evidence paths for {topic}",
+            kind="brief",
+            source="Corpus Topic",
+            priority=priority,
+            metadata={"documents": stats["count"]},
+            match_text=topic,
+        )
+        add_candidate(
+            f"Compare retrieval strategies around {topic}",
+            kind="brief",
+            source="Corpus Topic",
+            priority=priority - 2.0,
+            metadata={"documents": stats["count"]},
+            match_text=topic,
+        )
+
+    ranked = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)
+    return ranked[:limit]
+
+
+def _iter_metadata_terms(metadata: dict[str, Any], key: str, limit: int) -> list[str]:
+    value = metadata.get(key, [])
+    if not isinstance(value, list):
+        return []
+
+    terms: list[str] = []
+    for item in value:
+        term = _clean_suggestion(str(item))
+        if term:
+            terms.append(term)
+        if len(terms) >= limit:
+            break
+    return terms
+
+
+def _suggestion_match_score(normalized_query: str, candidate_text: str) -> float | None:
+    if not normalized_query:
+        return 0.0
+
+    haystack = _normalize_suggestion_text(candidate_text)
+    query_variants = _suggestion_query_variants(normalized_query)
+    scores = [_single_suggestion_match_score(query_variant, haystack) for query_variant in query_variants]
+    valid_scores = [score for score in scores if score is not None]
+    if not valid_scores:
+        return None
+
+    return max(valid_scores)
+
+
+def _single_suggestion_match_score(normalized_query: str, haystack: str) -> float | None:
+    tokens = normalized_query.split()
+    matched = sum(1 for token in tokens if token in haystack)
+    if matched == 0:
+        return None
+
+    score = 8.0 * matched / max(len(tokens), 1)
+    if haystack.startswith(normalized_query):
+        score += 48.0
+    elif normalized_query in haystack:
+        score += 24.0
+
+    haystack_words = haystack.split()
+    if any(word.startswith(normalized_query) for word in haystack_words):
+        score += 18.0
+    if all(any(word.startswith(token) for word in haystack_words) for token in tokens):
+        score += 12.0
+
+    return score
+
+
+def _suggestion_query_variants(normalized_query: str) -> list[str]:
+    aliases = {
+        "cnn": "convolutional neural network",
+        "cnns": "convolutional neural networks",
+        "llm": "large language model",
+        "llms": "large language models",
+        "qa": "question answering",
+        "rag": "retrieval augmented generation",
+    }
+    tokens = normalized_query.split()
+    expanded = " ".join(aliases.get(token, token) for token in tokens)
+
+    if expanded == normalized_query:
+        return [normalized_query]
+
+    return [normalized_query, expanded]
+
+
+def _human_topic(value: Any) -> str:
+    text = _clean_suggestion(str(value or ""))
+    if not text:
+        return ""
+
+    replacements = {
+        r"\bretrieval augmented generation\b": "retrieval-augmented generation",
+        r"\bmulti hop\b": "multi-hop",
+        r"\bquestion answering\b": "question answering",
+    }
+    for pattern, replacement in replacements.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    acronyms = {
+        "ai": "AI",
+        "api": "API",
+        "bm25": "BM25",
+        "cnn": "CNN",
+        "cnns": "CNNs",
+        "ir": "IR",
+        "llm": "LLM",
+        "llms": "LLMs",
+        "nlp": "NLP",
+        "qa": "QA",
+        "rag": "RAG",
+    }
+    return " ".join(acronyms.get(word.lower(), word) for word in text.split())
+
+
+def _clean_suggestion(value: str) -> str:
+    return re.sub(r"\s+", " ", value.replace("_", " ")).strip().rstrip(".")
+
+
+def _normalize_suggestion_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _safe_number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _list_corpora(directory: Path, source_type: str) -> list[dict[str, Any]]:
     if not directory.exists():
         return []
 
-    return [
-        {"id": file_path.name, "path": _public_path(file_path), "type": source_type}
-        for file_path in sorted(directory.glob("*.jsonl"))
-        if file_path.is_file()
-    ]
+    corpora: list[dict[str, Any]] = []
+    for file_path in sorted(directory.glob("*.jsonl")):
+        if not file_path.is_file():
+            continue
+
+        try:
+            corpus = Corpus.from_jsonl(file_path)
+        except (OSError, ValueError) as exc:
+            LOGGER.debug("Skipping non-corpus JSONL %s: %s", file_path, exc)
+            continue
+
+        if len(corpus) == 0:
+            LOGGER.debug("Skipping empty corpus JSONL %s", file_path)
+            continue
+
+        corpora.append(
+            {
+                "id": file_path.name,
+                "path": _public_path(file_path),
+                "type": source_type,
+                "documents": len(corpus),
+            }
+        )
+
+    return corpora
 
 
 def _public_path(path: Path) -> str:

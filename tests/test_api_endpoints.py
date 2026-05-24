@@ -57,6 +57,38 @@ class ApiEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("examples or data", response.json()["detail"])
 
+    def test_corpora_endpoint_lists_only_searchable_corpora(self) -> None:
+        response = self.client.get("/api/corpora")
+
+        self.assertEqual(response.status_code, 200)
+        corpora = response.json()["corpora"]
+        ids = {item["id"] for item in corpora}
+        paths = {item["path"] for item in corpora}
+
+        self.assertIn("corpus.jsonl", ids)
+        self.assertIn("arpo-openalex-corpus.jsonl", ids)
+        self.assertNotIn("queries.jsonl", ids)
+        self.assertNotIn("arpo-openalex-queries.jsonl", ids)
+        self.assertNotIn("examples/queries.jsonl", paths)
+        self.assertTrue(all(item["documents"] > 0 for item in corpora))
+
+    def test_suggest_returns_corpus_derived_retrieval_briefs(self) -> None:
+        response = self.client.get(
+            "/api/suggest",
+            params={
+                "q": "hallucination",
+                "corpus_path": "data/arpo-openalex-corpus.jsonl",
+                "limit": 5,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        suggestions = response.json()["suggestions"]
+        self.assertGreaterEqual(len(suggestions), 1)
+        self.assertTrue(any("hallucination" in item["text"].lower() for item in suggestions))
+        self.assertTrue(all(item["text"][0].isupper() for item in suggestions))
+        self.assertTrue(all("_" not in item["text"] for item in suggestions))
+
     def test_ablation_returns_real_variant_metrics(self) -> None:
         response = self.client.post(
             "/api/ablation",

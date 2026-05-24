@@ -6,13 +6,14 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 import { motion } from 'framer-motion';
 import { StepperField, TextField } from '../ui/controls';
 import { compactNumber, displayLabel, milliseconds } from '../../utils/format';
+import { DEFAULT_CORPUS_PATH, DEFAULT_QUERY_SET_PATH } from '../../utils/corpora';
 
 const VARIANTS = ['full', 'no_pruning', 'no_query_graph', 'sparse_only', 'dense_only', 'fixed_hybrid'];
 
 export function AblationDashboard() {
   const ablationMutation = useAblation();
-  const [corpusPath, setCorpusPath] = useState('examples/corpus.jsonl');
-  const [queriesPath, setQueriesPath] = useState('examples/queries.jsonl');
+  const [corpusPath, setCorpusPath] = useState(DEFAULT_CORPUS_PATH);
+  const [queriesPath, setQueriesPath] = useState(DEFAULT_QUERY_SET_PATH);
   const [topK, setTopK] = useState(5);
 
   const handleRun = () => {

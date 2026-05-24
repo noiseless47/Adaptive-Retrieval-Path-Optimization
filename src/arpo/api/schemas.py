@@ -12,13 +12,19 @@ class _StrictRequest(BaseModel):
 class SearchRequest(_StrictRequest):
     query: str = Field(..., min_length=3, max_length=2000)
     top_k: int = Field(5, ge=1, le=50)
-    corpus_path: str = Field("examples/corpus.jsonl", min_length=1, max_length=500)
+    corpus_path: str = Field("data/arpo-openalex-corpus.jsonl", min_length=1, max_length=500)
 
 
 class EvaluateRequest(_StrictRequest):
-    corpus_path: str = Field("examples/corpus.jsonl", min_length=1, max_length=500)
-    queries_path: str = Field("examples/queries.jsonl", min_length=1, max_length=500)
+    corpus_path: str = Field("data/arpo-openalex-corpus.jsonl", min_length=1, max_length=500)
+    queries_path: str = Field("data/arpo-openalex-queries.jsonl", min_length=1, max_length=500)
     top_k: int = Field(5, ge=1, le=50)
+
+
+class SuggestRequest(_StrictRequest):
+    q: str = Field("", max_length=240)
+    corpus_path: str = Field("data/arpo-openalex-corpus.jsonl", min_length=1, max_length=500)
+    limit: int = Field(8, ge=1, le=12)
 
 
 AblationVariant = Literal[

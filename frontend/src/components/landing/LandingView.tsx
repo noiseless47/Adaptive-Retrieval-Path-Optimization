@@ -3,32 +3,79 @@ import { motion } from 'framer-motion';
 import TextareaAutosize from 'react-textarea-autosize';
 import { ArrowUp, BrainCircuit, Network, Plus, Sparkles } from 'lucide-react';
 import { GridBackground } from './GridBackground';
-import { useSearch } from '../../api/hooks';
+import { useCorpora, useQuerySuggestions, useSearch } from '../../api/hooks';
+import { preferredCorpusPath } from '../../utils/corpora';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { QuerySuggestionPanel } from '../query/QuerySuggestionPanel';
+import { QuerySuggestion } from '../../types/api';
 
-const SAMPLE_PROMPTS = [
+const RETRIEVAL_BRIEFS = [
   {
-    query: 'Papers where transformers replaced CNNs in medical imaging while reducing inference cost',
-    tag: 'Scientific IR',
+    query: 'Trace evidence paths linking RAG hallucination detection to citation-grounded evaluation',
+    tag: 'RAG Reliability',
   },
   {
-    query: 'How do graph retrieval systems reduce hallucination in multi-hop QA?',
-    tag: 'Multi-Hop QA',
+    query: 'Compare graph expansion and dense retrieval for multi-hop question answering',
+    tag: 'Retrieval Strategy',
   },
   {
-    query: 'Adaptive query decomposition for ambiguous complex search',
-    tag: 'Query Routing',
+    query: 'Surface adaptive reranking methods for complex scientific search',
+    tag: 'Reranking',
   },
 ];
 
 export function LandingView() {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
   const searchMutation = useSearch();
+  const corporaQuery = useCorpora();
+  const selectedCorpusPath = preferredCorpusPath(corporaQuery.data?.corpora ?? []);
+  const debouncedQuery = useDebouncedValue(query, 180);
+  const suggestionsQuery = useQuerySuggestions(debouncedQuery, selectedCorpusPath, 6);
+  const suggestions = suggestionsQuery.data?.suggestions ?? [];
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [appliedSuggestionText, setAppliedSuggestionText] = useState('');
+  const safeActiveSuggestionIndex = Math.min(activeSuggestionIndex, Math.max(suggestions.length - 1, 0));
 
   const handleSearch = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!query.trim()) return;
-    searchMutation.mutate({ query });
+    searchMutation.mutate({ query, corpus_path: selectedCorpusPath });
   };
+
+  const handleQueryChange = (nextQuery: string) => {
+    setQuery(nextQuery);
+    setActiveSuggestionIndex(0);
+    setAppliedSuggestionText('');
+  };
+
+  const applySuggestion = (suggestion: QuerySuggestion) => {
+    setQuery(suggestion.text);
+    setActiveSuggestionIndex(0);
+    setAppliedSuggestionText(suggestion.text);
+  };
+
+  const handleSuggestionKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    if (!suggestions.length) return;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveSuggestionIndex((index) => (index + 1) % suggestions.length);
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveSuggestionIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+    }
+
+    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+      event.preventDefault();
+      applySuggestion(suggestions[safeActiveSuggestionIndex] ?? suggestions[0]);
+    }
+  };
+
+  const showSuggestions = query.trim().length >= 2
+    && query !== appliedSuggestionText
+    && (suggestions.length > 0 || suggestionsQuery.isFetching);
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-[var(--color-bg-base)]">
@@ -38,12 +85,9 @@ export function LandingView() {
         initial={{ opacity: 0, x: -16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.65, ease: 'easeOut' }}
-        className="absolute left-6 right-6 top-6 z-10 max-w-[460px] sm:left-8 sm:right-auto sm:top-8"
+        className="absolute left-10 right-6 top-6 z-10 max-w-[460px] sm:left-12 sm:right-auto sm:top-8"
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-panel)] glow-cyan">
-            <span className="text-xl font-bold text-[var(--color-accent-cyan)]">A</span>
-          </div>
+        <div className="flex items-center">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal text-[var(--color-text-primary)]">ARPO Studio</h1>
             <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
@@ -80,8 +124,9 @@ export function LandingView() {
             <div className="relative overflow-hidden rounded-[24px] border border-[rgba(31,41,55,0.95)] bg-[rgba(17,24,39,0.92)] shadow-[0_30px_100px_-64px_rgba(0,0,0,1)] backdrop-blur-xl transition focus-within:border-[rgba(34,211,238,0.72)] focus-within:bg-[rgba(17,24,39,0.98)]">
               <TextareaAutosize
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Ask ARPO to resolve a complex research query..."
+                onChange={(event) => handleQueryChange(event.target.value)}
+                onKeyDown={handleSuggestionKeyDown}
+                placeholder="Describe a retrieval mission..."
                 minRows={3}
                 maxRows={6}
                 className="w-full resize-none bg-transparent px-6 pb-3 pt-5 text-[15px] leading-6 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]"
@@ -98,7 +143,7 @@ export function LandingView() {
                   </button>
                   <div className="hidden items-center gap-2 rounded-full border border-[var(--color-border-subtle)] bg-[rgba(7,11,23,0.6)] px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] sm:flex">
                     <Sparkles size={14} className="text-[var(--color-accent-cyan)]" />
-                    OpenAlex corpus ready
+                    OpenAlex research corpus
                   </div>
                   <span className="hidden font-mono text-[11px] text-[var(--color-text-muted)] sm:inline">
                     {query.trim().length} chars
@@ -120,23 +165,38 @@ export function LandingView() {
             </div>
           </form>
 
-          <div className="mx-auto mt-6 flex max-w-2xl flex-wrap justify-center gap-2">
-            {SAMPLE_PROMPTS.map((prompt, idx) => (
-              <motion.button
-                key={prompt.query}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.22 + idx * 0.08 }}
-                onClick={() => setQuery(prompt.query)}
-                className="group inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--color-border-subtle)] bg-[rgba(17,24,39,0.52)] px-4 py-2.5 text-left text-sm text-[var(--color-text-primary)] transition hover:border-[rgba(34,211,238,0.58)] hover:bg-[rgba(17,24,39,0.92)]"
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent-cyan)] shadow-[0_0_10px_var(--color-accent-cyan)]" />
-                <span className="truncate">{prompt.query}</span>
-                <span className="hidden shrink-0 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] md:inline">
-                  {prompt.tag}
-                </span>
-              </motion.button>
-            ))}
+          {showSuggestions && (
+            <QuerySuggestionPanel
+              suggestions={suggestions}
+              isLoading={suggestionsQuery.isFetching}
+              activeIndex={safeActiveSuggestionIndex}
+              onActiveIndex={setActiveSuggestionIndex}
+              onSelect={applySuggestion}
+            />
+          )}
+
+          <div className="mx-auto mt-6 max-w-2xl">
+            <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Retrieval Briefs
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {RETRIEVAL_BRIEFS.map((prompt, idx) => (
+                <motion.button
+                  key={prompt.query}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.22 + idx * 0.08 }}
+                  onClick={() => handleQueryChange(prompt.query)}
+                  className="group inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--color-border-subtle)] bg-[rgba(17,24,39,0.52)] px-4 py-2.5 text-left text-sm text-[var(--color-text-primary)] transition hover:border-[rgba(34,211,238,0.58)] hover:bg-[rgba(17,24,39,0.92)]"
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent-cyan)] shadow-[0_0_10px_var(--color-accent-cyan)]" />
+                  <span className="truncate">{prompt.query}</span>
+                  <span className="hidden shrink-0 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] md:inline">
+                    {prompt.tag}
+                  </span>
+                </motion.button>
+              ))}
+            </div>
           </div>
         </motion.section>
       </main>

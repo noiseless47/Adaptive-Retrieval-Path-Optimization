@@ -6,11 +6,12 @@ import { MetricsBarChart } from './MetricsBarChart';
 import { motion } from 'framer-motion';
 import { StepperField, TextField } from '../ui/controls';
 import { compactNumber, displayLabel, milliseconds } from '../../utils/format';
+import { DEFAULT_CORPUS_PATH, DEFAULT_QUERY_SET_PATH } from '../../utils/corpora';
 
 export function EvaluationLab() {
   const evalMutation = useEvaluation();
-  const [corpusPath, setCorpusPath] = useState('examples/corpus.jsonl');
-  const [queriesPath, setQueriesPath] = useState('examples/queries.jsonl');
+  const [corpusPath, setCorpusPath] = useState(DEFAULT_CORPUS_PATH);
+  const [queriesPath, setQueriesPath] = useState(DEFAULT_QUERY_SET_PATH);
   const [topK, setTopK] = useState(5);
 
   const handleRun = () => {

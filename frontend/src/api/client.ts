@@ -7,7 +7,10 @@ import {
   EvaluationReportSchema,
   PipelineResult,
   PipelineResultSchema,
+  QuerySuggestionsResponse,
+  QuerySuggestionsResponseSchema,
 } from '../types/api';
+import { DEFAULT_CORPUS_PATH, DEFAULT_QUERY_SET_PATH } from '../utils/corpora';
 
 export interface SearchParams {
   query: string;
@@ -27,6 +30,24 @@ export async function listCorporaAPI(): Promise<CorporaResponse> {
   return CorporaResponseSchema.parse(await response.json());
 }
 
+export interface SuggestParams {
+  q: string;
+  corpus_path?: string;
+  limit?: number;
+}
+
+export async function suggestAPI(params: SuggestParams): Promise<QuerySuggestionsResponse> {
+  const query = new URLSearchParams({
+    q: params.q,
+    corpus_path: params.corpus_path || DEFAULT_CORPUS_PATH,
+    limit: String(params.limit || 8),
+  });
+
+  const response = await fetch(`/api/suggest?${query.toString()}`);
+  await assertOk(response, 'Failed to load suggestions');
+  return QuerySuggestionsResponseSchema.parse(await response.json());
+}
+
 export async function searchAPI(params: SearchParams): Promise<PipelineResult> {
   const response = await fetch('/api/search', {
     method: 'POST',
@@ -34,7 +55,7 @@ export async function searchAPI(params: SearchParams): Promise<PipelineResult> {
     body: JSON.stringify({
       query: params.query,
       top_k: params.top_k || 5,
-      corpus_path: params.corpus_path || "examples/corpus.jsonl"
+      corpus_path: params.corpus_path || DEFAULT_CORPUS_PATH
     })
   });
   
@@ -55,8 +76,8 @@ export async function evaluateAPI(params: EvaluateParams): Promise<EvaluationRep
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      corpus_path: params.corpus_path || "examples/corpus.jsonl",
-      queries_path: params.queries_path || "examples/queries.jsonl",
+      corpus_path: params.corpus_path || DEFAULT_CORPUS_PATH,
+      queries_path: params.queries_path || DEFAULT_QUERY_SET_PATH,
       top_k: params.top_k || 5
     })
   });
@@ -73,8 +94,8 @@ export async function ablationAPI(params: AblationParams): Promise<AblationRepor
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      corpus_path: params.corpus_path || "examples/corpus.jsonl",
-      queries_path: params.queries_path || "examples/queries.jsonl",
+      corpus_path: params.corpus_path || DEFAULT_CORPUS_PATH,
+      queries_path: params.queries_path || DEFAULT_QUERY_SET_PATH,
       top_k: params.top_k || 5,
       variants: params.variants || ["full", "no_pruning", "no_query_graph", "sparse_only", "dense_only", "fixed_hybrid"]
     })

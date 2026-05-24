@@ -8,14 +8,21 @@ const ACRONYMS = new Map<string, string>([
   ['ir', 'IR'],
   ['mrr', 'MRR'],
   ['ndcg', 'NDCG'],
+  ['openalex', 'OpenAlex'],
   ['qa', 'QA'],
   ['rag', 'RAG'],
+  ['llm', 'LLM'],
+  ['llms', 'LLMs'],
 ]);
 
 export function displayLabel(value: unknown): string {
   if (value === null || value === undefined) return 'Not Available';
 
-  const normalized = String(value)
+  const raw = String(value);
+  const compactKey = raw.replace(/[^a-z0-9]+/gi, '').toLowerCase();
+  if (ACRONYMS.has(compactKey)) return ACRONYMS.get(compactKey) ?? raw;
+
+  const normalized = raw
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
