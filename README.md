@@ -28,6 +28,8 @@ Most RAG systems retrieve a static number of chunks and then ask a generator to 
 
 ## Quick Start
 
+For a full new-machine setup, see [`docs/setup-guide.md`](docs/setup-guide.md).
+
 Install the local package:
 
 ```powershell
