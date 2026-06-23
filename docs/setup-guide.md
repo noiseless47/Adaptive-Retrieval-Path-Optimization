@@ -334,6 +334,21 @@ python -m arpo.harvest_cli `
   --mailto your-email@example.com
 ```
 
+Convert a local S2ORC full-text shard into an ARPO evidence corpus:
+
+```powershell
+python -m arpo.s2orc_cli `
+  data/raw/s2orc-sample.jsonl.gz `
+  data/arpo-s2orc-corpus.jsonl `
+  --limit 1000
+```
+
+Use OpenAlex as the discovery/metadata backbone and S2ORC as the full-text
+evidence layer. The S2ORC converter reads local `.jsonl` or `.jsonl.gz` shards,
+extracts `pdf_parse.body_text`, section names, citation spans, and bibliography
+links, then emits section-level ARPO documents. The project does not bundle
+S2ORC because the real dataset is very large.
+
 After changing the corpus, restart the backend so fresh corpus metadata and
 autocomplete suggestions are loaded consistently.
 

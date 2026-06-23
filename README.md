@@ -56,6 +56,15 @@ Or harvest a starter scholarly corpus from OpenAlex across ARPO research topics:
 python -m arpo.harvest_cli --output data/arpo-openalex-corpus.jsonl --raw-output data/raw/openalex-works.jsonl --per-topic 50
 ```
 
+Convert locally downloaded S2ORC shards into a richer evidence corpus:
+
+```powershell
+python -m arpo.s2orc_cli data/raw/s2orc-sample.jsonl.gz data/arpo-s2orc-corpus.jsonl --limit 1000
+```
+
+Use OpenAlex as the discovery/metadata layer and S2ORC as the full-text evidence
+layer when you have local S2ORC shards available.
+
 Then search it:
 
 ```powershell

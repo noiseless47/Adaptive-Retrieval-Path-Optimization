@@ -71,6 +71,7 @@ arpo-ingest = "arpo.ingest_cli:main"
 arpo-index = "arpo.index_cli:main"
 arpo-corpus = "arpo.corpus_cli:main"
 arpo-research = "arpo.research_cli:main"
+arpo-s2orc = "arpo.s2orc_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

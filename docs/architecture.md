@@ -25,6 +25,21 @@ RAW SOURCES
   -> ARPO JSONL corpus
 ```
 
+Scholarly corpus preparation has two intended layers:
+
+```text
+OpenAlex
+  -> paper discovery, metadata, concepts, DOI/OA URLs, citation hints
+
+S2ORC
+  -> local full-text shards, section text, bibliography links, citation spans
+  -> ARPO section-level evidence corpus
+```
+
+OpenAlex is implemented as the default discovery corpus. S2ORC is implemented as
+a local converter for downloaded JSONL/JSONL.GZ shards; the project does not
+bundle the massive S2ORC dataset.
+
 ## Core Research Objects
 
 ### Query Analysis
@@ -42,6 +57,14 @@ The strategy planner decides sparse, dense, and graph weights, traversal depth, 
 ### Corpus Ingestion
 
 The ingestion layer converts larger source collections into ARPO's JSONL document contract. It preserves source metadata, creates overlapping chunks, extracts lightweight keywords/entities, and links adjacent or semantically related chunks through `related_ids`. This gives graph expansion something meaningful to traverse beyond the six-document demo corpus.
+
+### S2ORC Evidence Ingestion
+
+The S2ORC adapter reads local S2ORC-style JSONL or gzipped JSONL shards. It
+extracts `pdf_parse.body_text`, section names, citation spans, and bibliography
+links, then emits ARPO documents with `source=S2ORC`, section metadata, citation
+IDs, and related IDs. This lets ARPO retrieve section-level evidence instead of
+only title/abstract metadata.
 
 ### Evidence Graph
 
