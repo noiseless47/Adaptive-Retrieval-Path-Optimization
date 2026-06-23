@@ -112,6 +112,12 @@ TanStack Query, React Flow, Recharts, Framer Motion, cmdk, Radix controls, and Z
 
 ## 5. Start Backend And Frontend Together
 
+Optional: copy `.env.example` to `.env` and adjust values before starting.
+
+```powershell
+Copy-Item .env.example .env
+```
+
 The easiest path on Windows is the provided script:
 
 ```powershell
@@ -371,6 +377,17 @@ python -m arpo.eval_cli `
 The frontend Evaluation and Ablation pages default to the same production corpus
 and query set.
 
+Run a research claim study with baselines, paired statistics, failure analysis,
+and paper-ready artifacts:
+
+```powershell
+python -m arpo.research_cli --config experiments/claim-study.openalex.json
+```
+
+Artifacts are written to `data/experiments/` as JSON, CSV, and Markdown. The
+Ablation page also has a Claim Study action that calls the same research API and
+shows verdicts, deltas, confidence intervals, p-values, and failure cases.
+
 ## 15. Useful Environment Variables
 
 | Variable | Default | Purpose |
@@ -464,3 +481,9 @@ verification. Move to SentenceTransformers only after the base app works.
 8. Open `http://127.0.0.1:5173`.
 9. Type `rag hallu` in the landing input and confirm corpus autocomplete appears.
 10. Run the quality checks before presenting or submitting.
+
+For the current production-readiness map, see:
+
+```text
+docs/production-readiness.md
+```

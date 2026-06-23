@@ -5,6 +5,7 @@ from time import perf_counter
 
 from arpo.analysis import QueryComplexityAnalyzer
 from arpo.evidence import EvidenceGraphBuilder
+from arpo.evaluation.metrics import evidence_audit
 from arpo.generation import EvidenceGroundedAnswerGenerator
 from arpo.graph import DynamicQueryGraphBuilder
 from arpo.models import PipelineResult, QueryAnalysis, QueryGraph, QueryGraphNode, RetrievalStrategy
@@ -126,6 +127,7 @@ class ARPOPipeline:
                 "stage_timings_ms": timings,
                 "query_graph_enabled": not disable_query_graph,
                 "retriever": self.retriever.diagnostics(),
+                "evidence_audit": evidence_audit(ranked_evidence),
             },
         )
 

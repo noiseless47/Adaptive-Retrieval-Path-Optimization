@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,7 @@ class IngestionReport:
     output_path: str
     source_documents: int
     chunks: int
+    duplicates_removed: int
     chunk_words: int
     overlap_words: int
 
@@ -41,6 +43,7 @@ class IngestionReport:
             "output_path": self.output_path,
             "source_documents": self.source_documents,
             "chunks": self.chunks,
+            "duplicates_removed": self.duplicates_removed,
             "chunk_words": self.chunk_words,
             "overlap_words": self.overlap_words,
         }
@@ -64,13 +67,14 @@ def ingest_path(
     if not sources:
         raise ValueError("No source documents were found for ingestion.")
 
-    chunks = build_chunk_documents(
+    raw_chunks = build_chunk_documents(
         sources,
         source_path=source_path,
         chunk_words=chunk_words,
         overlap_words=overlap_words,
         min_chunk_chars=min_chunk_chars,
     )
+    chunks, duplicates_removed = _dedupe_documents(raw_chunks)
     if not chunks:
         raise ValueError("Ingestion produced no chunks. Check source text length and chunk settings.")
 
@@ -96,6 +100,7 @@ def ingest_path(
         output_path=destination.as_posix(),
         source_documents=len(sources),
         chunks=len(chunks),
+        duplicates_removed=duplicates_removed,
         chunk_words=chunk_words,
         overlap_words=overlap_words,
     )
@@ -345,6 +350,43 @@ def _attach_chunk_relations(
         enriched.append(Document(document.id, document.title, document.text, metadata))
 
     return enriched
+
+
+def _dedupe_documents(documents: list[Document]) -> tuple[list[Document], int]:
+    seen: set[str] = set()
+    deduped: list[Document] = []
+    removed = 0
+
+    for document in documents:
+        fingerprint = _document_fingerprint(document)
+        if fingerprint in seen:
+            removed += 1
+            continue
+        seen.add(fingerprint)
+        deduped.append(document)
+
+    kept_ids = {document.id for document in deduped}
+    cleaned: list[Document] = []
+    for document in deduped:
+        metadata = dict(document.metadata)
+        metadata["related_ids"] = [
+            document_id
+            for document_id in _coerce_string_list(metadata.get("related_ids"))
+            if document_id in kept_ids and document_id != document.id
+        ]
+        metadata["citations"] = [
+            document_id
+            for document_id in _coerce_string_list(metadata.get("citations"))
+            if document_id in kept_ids and document_id != document.id
+        ]
+        cleaned.append(Document(document.id, document.title, document.text, metadata))
+
+    return cleaned, removed
+
+
+def _document_fingerprint(document: Document) -> str:
+    normalized = _clean_text(f"{document.title}\n{document.text}").casefold()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _validate_ingestion_settings(chunk_words: int, overlap_words: int, min_chunk_chars: int) -> None:

@@ -1,5 +1,15 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { checkHealth, listCorporaAPI, searchAPI, SearchParams, suggestAPI } from './client';
+import {
+  checkHealth,
+  getJobAPI,
+  getRunAPI,
+  listCorporaAPI,
+  listJobsAPI,
+  listRunsAPI,
+  searchAPI,
+  SearchParams,
+  suggestAPI,
+} from './client';
 import { useAppStore } from '../store/app-store';
 
 export function useHealthCheck() {
@@ -22,13 +32,57 @@ export function useSearch() {
   });
 }
 
-import { evaluateAPI, ablationAPI, EvaluateParams, AblationParams } from './client';
+import {
+  ablationAPI,
+  AblationParams,
+  claimStudyAPI,
+  ClaimStudyParams,
+  evaluateAPI,
+  EvaluateParams,
+} from './client';
 
 export function useCorpora() {
   return useQuery({
     queryKey: ['corpora'],
     queryFn: listCorporaAPI,
     staleTime: 15000,
+  });
+}
+
+export function useRuns(limit = 25) {
+  return useQuery({
+    queryKey: ['runs', limit],
+    queryFn: () => listRunsAPI(limit),
+    staleTime: 10000,
+  });
+}
+
+export function useRun(runId: string | null) {
+  return useQuery({
+    queryKey: ['run', runId],
+    queryFn: () => getRunAPI(runId || ''),
+    enabled: Boolean(runId),
+    staleTime: 30000,
+  });
+}
+
+export function useJobs(limit = 25) {
+  return useQuery({
+    queryKey: ['jobs', limit],
+    queryFn: () => listJobsAPI(limit),
+    refetchInterval: 3000,
+  });
+}
+
+export function useJob(jobId: string | null) {
+  return useQuery({
+    queryKey: ['job', jobId],
+    queryFn: () => getJobAPI(jobId || ''),
+    enabled: Boolean(jobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'completed' || status === 'failed' ? false : 1500;
+    },
   });
 }
 
@@ -52,5 +106,11 @@ export function useEvaluation() {
 export function useAblation() {
   return useMutation({
     mutationFn: (params: AblationParams) => ablationAPI(params)
+  });
+}
+
+export function useClaimStudy() {
+  return useMutation({
+    mutationFn: (params: ClaimStudyParams) => claimStudyAPI(params)
   });
 }

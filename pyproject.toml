@@ -69,6 +69,8 @@ arpo-evaluate = "arpo.eval_cli:main"
 arpo-harvest = "arpo.harvest_cli:main"
 arpo-ingest = "arpo.ingest_cli:main"
 arpo-index = "arpo.index_cli:main"
+arpo-corpus = "arpo.corpus_cli:main"
+arpo-research = "arpo.research_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

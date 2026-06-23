@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from arpo.evaluation.metrics import mean_reciprocal_rank, ndcg_at_k, precision_at_k, recall_at_k
+from arpo.evaluation.metrics import (
+    mean_reciprocal_rank,
+    ndcg_at_k,
+    precision_at_k,
+    recall_at_k,
+    reciprocal_rank,
+)
 from arpo.models import QueryAnalysis, RetrievalStrategy
 from arpo.pipeline import ARPOPipeline
 from arpo.retrieval import Corpus
@@ -87,6 +93,11 @@ def evaluate_pipeline(
                 "precision_at_k": precision_at_k(ranking, record.relevant_ids, top_k),
                 "recall_at_k": recall_at_k(ranking, record.relevant_ids, top_k),
                 "ndcg_at_k": ndcg_at_k(ranking, record.graded_relevance, top_k),
+                "mrr": reciprocal_rank(ranking, record.relevant_ids),
+                "relevant_retrieved": sum(
+                    1 for document_id in ranking[:top_k] if document_id in record.relevant_ids
+                ),
+                "relevant_total": len(record.relevant_ids),
                 "latency_ms": latency_ms,
                 "diagnostics": result.diagnostics,
             }

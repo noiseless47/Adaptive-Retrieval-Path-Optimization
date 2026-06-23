@@ -1,0 +1,16 @@
+{
+  "corpus_path": "data/arpo-openalex-corpus.jsonl",
+  "queries_path": "data/arpo-openalex-queries.jsonl",
+  "benchmark": "native",
+  "split": "test",
+  "top_k": 5,
+  "variants": [
+    "full",
+    "no_pruning",
+    "no_query_graph",
+    "sparse_only",
+    "dense_only",
+    "fixed_hybrid"
+  ],
+  "output_dir": "data/experiments"
+}

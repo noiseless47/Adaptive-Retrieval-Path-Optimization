@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from typing import Any
+
+from arpo.models import EvidenceNode
 
 
 def precision_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
@@ -48,3 +51,31 @@ def ndcg_at_k(retrieved: list[str], graded_relevance: dict[str, float], k: int) 
         return 0.0
     return dcg(retrieved) / ideal_dcg
 
+
+def evidence_audit(evidence: tuple[EvidenceNode, ...]) -> dict[str, Any]:
+    if not evidence:
+        return {
+            "average_confidence": 0.0,
+            "min_confidence": 0.0,
+            "average_contradiction_risk": 0.0,
+            "high_risk_evidence_count": 0,
+            "unsupported_claim_risk": 1.0,
+            "evidence_count": 0,
+        }
+
+    confidences = [node.confidence for node in evidence]
+    contradiction_risks = [
+        float(node.features.get("contradiction_risk", 0.0))
+        for node in evidence
+    ]
+    high_risk_count = sum(1 for risk in contradiction_risks if risk >= 0.5)
+    low_confidence_count = sum(1 for confidence in confidences if confidence < 0.45)
+
+    return {
+        "average_confidence": round(sum(confidences) / len(confidences), 4),
+        "min_confidence": round(min(confidences), 4),
+        "average_contradiction_risk": round(sum(contradiction_risks) / len(contradiction_risks), 4),
+        "high_risk_evidence_count": high_risk_count,
+        "unsupported_claim_risk": round((low_confidence_count + high_risk_count) / (2 * len(evidence)), 4),
+        "evidence_count": len(evidence),
+    }

@@ -27,6 +27,13 @@ class SuggestRequest(_StrictRequest):
     limit: int = Field(8, ge=1, le=12)
 
 
+class IndexRequest(_StrictRequest):
+    corpus_path: str = Field("data/arpo-openalex-corpus.jsonl", min_length=1, max_length=500)
+    backend: str = Field("hash", min_length=1, max_length=80)
+    model_id: str | None = Field(None, max_length=200)
+    index_dir: str | None = Field(None, max_length=500)
+
+
 AblationVariant = Literal[
     "full",
     "no_pruning",
@@ -50,3 +57,12 @@ class AblationRequest(EvaluateRequest):
         min_length=1,
         max_length=6,
     )
+
+
+BenchmarkFormat = Literal["auto", "native", "hotpotqa", "scifact", "beir"]
+
+
+class ClaimStudyRequest(AblationRequest):
+    benchmark: BenchmarkFormat = "auto"
+    split: str = Field("test", min_length=1, max_length=80)
+    output_dir: str | None = Field("data/experiments", max_length=500)

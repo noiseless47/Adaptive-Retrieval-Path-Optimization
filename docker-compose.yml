@@ -1,0 +1,46 @@
+services:
+  arpo:
+    build: .
+    image: arpo-studio:local
+    ports:
+      - "8000:8000"
+    environment:
+      ARPO_WORKSPACE_ROOT: /app
+      ARPO_DATA_DIR: /app/data
+      ARPO_EXAMPLES_DIR: /app/examples
+      ARPO_FRONTEND_DIST: /app/frontend/dist
+      ARPO_CORS_ORIGINS: http://127.0.0.1:8000,http://localhost:8000
+      ARPO_RATE_LIMIT_PER_MINUTE: "120"
+      ARPO_JOB_WORKERS: "2"
+      ARPO_RUN_STORE: /app/data/arpo-runs.sqlite
+      ARPO_VECTOR_INDEX_DIR: /app/data/vector-indexes
+      ARPO_EMBEDDING_BACKEND: hash
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    profiles: ["infra"]
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  neo4j:
+    image: neo4j:5-community
+    profiles: ["infra"]
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/arpo-development
+    volumes:
+      - neo4j-data:/data
+
+volumes:
+  qdrant-data:
+  neo4j-data:

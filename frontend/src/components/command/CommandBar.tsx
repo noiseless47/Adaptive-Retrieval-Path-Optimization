@@ -2,10 +2,13 @@ import React from 'react';
 import { Search, Command, LayoutGrid, TerminalSquare, FlaskConical } from 'lucide-react';
 import { useAppStore } from '../../store/app-store';
 import { AppTooltip } from '../ui/controls';
+import { useHealthCheck } from '../../api/hooks';
 
 export function CommandBar() {
   const { state, dispatch } = useAppStore();
+  const health = useHealthCheck();
   const openPalette = () => window.dispatchEvent(new Event('arpo:open-command-palette'));
+  const connected = health.isSuccess;
 
   return (
     <div className="h-12 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] flex items-center px-4 justify-between select-none">
@@ -58,8 +61,16 @@ export function CommandBar() {
         </AppTooltip>
         
         <div className="flex items-center gap-2 text-xs">
-          <div className="w-2 h-2 rounded-full bg-[var(--color-success)] shadow-[0_0_8px_var(--color-success)]"></div>
-          <span className="text-[var(--color-text-muted)]">Connected</span>
+          <div
+            className={`h-2 w-2 rounded-full ${
+              connected
+                ? 'bg-[var(--color-success)] shadow-[0_0_8px_var(--color-success)]'
+                : 'bg-[var(--color-danger)] shadow-[0_0_8px_var(--color-danger)]'
+            }`}
+          />
+          <span className="text-[var(--color-text-muted)]">
+            {connected ? 'Connected' : health.isLoading ? 'Checking' : 'Offline'}
+          </span>
         </div>
       </div>
     </div>

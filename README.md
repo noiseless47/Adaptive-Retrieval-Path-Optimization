@@ -29,6 +29,8 @@ Most RAG systems retrieve a static number of chunks and then ask a generator to 
 ## Quick Start
 
 For a full new-machine setup, see [`docs/setup-guide.md`](docs/setup-guide.md).
+For an internal explanation of how ARPO works, see [`docs/internal-workings.md`](docs/internal-workings.md).
+For production-hardening details, see [`docs/production-readiness.md`](docs/production-readiness.md).
 
 Install the local package:
 
@@ -154,6 +156,13 @@ Run the included mini evaluation set:
 
 ```powershell
 python -m arpo.eval_cli --queries examples/queries.jsonl --corpus examples/corpus.jsonl --top-k 3
+```
+
+Run the research claim study layer with baselines, paired statistics, verdicts,
+failure analysis, and JSON/CSV/Markdown artifacts:
+
+```powershell
+python -m arpo.research_cli --config experiments/claim-study.openalex.json
 ```
 
 The bundled `examples/corpus.jsonl` is intentionally tiny. Use `arpo-ingest` or `/corpora/ingest` to create larger corpora before drawing conclusions from retrieval quality, pruning behavior, or ablation metrics.

@@ -3,36 +3,53 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import replace
+import threading
 from pathlib import Path
+from time import perf_counter, time
 from typing import Any
 from uuid import uuid4
 
+from arpo.api.runtime import ApiMetrics, JobManager, RunStore
+from arpo.corpus_quality import corpus_quality_report
+from arpo.evaluation.benchmarks import load_benchmark_records
+from arpo.evaluation.claim_study import run_claim_study
+from arpo.evaluation.variants import VARIANT_LABELS, validate_variants, variant_controls
 from arpo.ingestion import ingest_path
 from arpo.ingestion.pipeline import SUPPORTED_SOURCE_EXTENSIONS
-from arpo.models import QueryAnalysis, RetrievalStrategy
 from arpo.pipeline import ARPOPipeline
-from arpo.planning.strategy import RetrievalStrategyPlanner
 from arpo.retrieval import Corpus
+from arpo.retrieval.embeddings import build_embedding_backend
+from arpo.retrieval.vector_index import PersistentVectorIndex
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
     from fastapi.staticfiles import StaticFiles
 
-    from arpo.api.schemas import AblationRequest, EvaluateRequest, SearchRequest, SuggestRequest
+    from arpo.api.schemas import (
+        AblationRequest,
+        ClaimStudyRequest,
+        EvaluateRequest,
+        IndexRequest,
+        SearchRequest,
+        SuggestRequest,
+    )
     from arpo.evaluation.runner import evaluate_pipeline, load_query_records
 except ImportError as exc:  # pragma: no cover
     FastAPI = None
     File = None
     Form = None
     HTTPException = None
+    JSONResponse = None
     StaticFiles = None
     UploadFile = None
     CORSMiddleware = None
     SearchRequest = None
     EvaluateRequest = None
     AblationRequest = None
+    ClaimStudyRequest = None
+    IndexRequest = None
     SuggestRequest = None
     evaluate_pipeline = None
     load_query_records = None
@@ -47,16 +64,19 @@ DATA_DIR = Path(os.getenv("ARPO_DATA_DIR", WORKSPACE_ROOT / "data")).resolve()
 EXAMPLES_DIR = Path(os.getenv("ARPO_EXAMPLES_DIR", WORKSPACE_ROOT / "examples")).resolve()
 FRONTEND_DIST = Path(os.getenv("ARPO_FRONTEND_DIST", WORKSPACE_ROOT / "frontend" / "dist")).resolve()
 MAX_UPLOAD_BYTES = int(os.getenv("ARPO_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+RUN_STORE_PATH = Path(os.getenv("ARPO_RUN_STORE", DATA_DIR / "arpo-runs.sqlite")).resolve()
+JOB_WORKERS = int(os.getenv("ARPO_JOB_WORKERS", "2"))
+API_KEYS = {key.strip() for key in os.getenv("ARPO_API_KEYS", "").split(",") if key.strip()}
+RATE_LIMIT_PER_MINUTE = int(os.getenv("ARPO_RATE_LIMIT_PER_MINUTE", "120"))
 SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.jsonl$")
 SAFE_SOURCE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.[A-Za-z0-9]{1,12}$")
-ALLOWED_ABLATION_VARIANTS = {
-    "full": "Full ARPO",
-    "no_pruning": "No Pruning",
-    "no_query_graph": "No Query Graph",
-    "sparse_only": "Sparse Only",
-    "dense_only": "Dense Only",
-    "fixed_hybrid": "Fixed Hybrid",
-}
+PUBLIC_API_PATHS = {"/health", "/api/health", "/healthz", "/api/healthz"}
+ALLOWED_ABLATION_VARIANTS = VARIANT_LABELS
+API_METRICS = ApiMetrics()
+RUN_STORE = RunStore(RUN_STORE_PATH)
+JOB_MANAGER = JobManager(max_workers=JOB_WORKERS, run_store=RUN_STORE)
+RATE_LIMIT_LOCK = threading.Lock()
+RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 
 
 def create_app() -> Any:
@@ -74,8 +94,54 @@ def create_app() -> Any:
         allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "x-api-key"],
     )
+
+    @app.middleware("http")
+    async def production_middleware(request: Any, call_next: Any) -> Any:
+        request_id = request.headers.get("x-request-id") or uuid4().hex[:16]
+        start = perf_counter()
+        response = None
+
+        try:
+            if not _is_authorized(request):
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "Missing or invalid API key.", "request_id": request_id},
+                )
+            elif not _rate_limit_allows(request):
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded.", "request_id": request_id},
+                )
+            else:
+                response = await call_next(request)
+        except Exception:
+            API_METRICS.record(
+                path=request.url.path,
+                status_code=500,
+                latency_ms=_elapsed_ms(start),
+            )
+            LOGGER.exception("Unhandled request error [request_id=%s]", request_id)
+            raise
+
+        latency_ms = _elapsed_ms(start)
+        response.headers["x-request-id"] = request_id
+        response.headers["x-arpo-latency-ms"] = str(latency_ms)
+        API_METRICS.record(
+            path=request.url.path,
+            status_code=response.status_code,
+            latency_ms=latency_ms,
+        )
+        LOGGER.info(
+            "request_id=%s method=%s path=%s status=%s latency_ms=%s",
+            request_id,
+            request.method,
+            request.url.path,
+            response.status_code,
+            latency_ms,
+        )
+        return response
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -83,12 +149,41 @@ def create_app() -> Any:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/healthz")
+    def healthz() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "workspace_root": WORKSPACE_ROOT.as_posix(),
+            "data_dir": DATA_DIR.as_posix(),
+            "frontend_dist_exists": FRONTEND_DIST.exists(),
+            "run_store": _public_path(RUN_STORE_PATH),
+            "auth_enabled": bool(API_KEYS),
+            "rate_limit_per_minute": RATE_LIMIT_PER_MINUTE,
+        }
+
+    @app.get("/metrics")
+    def metrics() -> dict[str, Any]:
+        return {
+            "api": API_METRICS.snapshot(),
+            "jobs": JOB_MANAGER.list(limit=10),
+            "recent_runs": RUN_STORE.list_runs(limit=10),
+        }
+
     @app.post("/search")
     def search(request: SearchRequest) -> dict[str, Any]:
         try:
             corpus = Corpus.from_jsonl(_resolve_jsonl_path(request.corpus_path, must_exist=True))
             pipeline = ARPOPipeline.from_corpus(corpus)
-            return pipeline.run(request.query, top_k=request.top_k).to_dict()
+            result = pipeline.run(request.query, top_k=request.top_k).to_dict()
+            run = RUN_STORE.save_run(
+                run_type="search",
+                status="completed",
+                request=request.model_dump(),
+                response=result,
+                latency_ms=float(result["diagnostics"].get("latency_ms", 0.0)),
+            )
+            result["diagnostics"]["run_id"] = run["id"]
+            return result
         except Exception as exc:
             _raise_http_error("search", exc)
 
@@ -97,24 +192,30 @@ def create_app() -> Any:
         try:
             corpus = Corpus.from_jsonl(_resolve_jsonl_path(request.corpus_path, must_exist=True))
             records = load_query_records(_resolve_jsonl_path(request.queries_path, must_exist=True))
-            return evaluate_pipeline(corpus, records, top_k=request.top_k)
+            report = evaluate_pipeline(corpus, records, top_k=request.top_k)
+            run = RUN_STORE.save_run(
+                run_type="evaluation",
+                status="completed",
+                request=request.model_dump(),
+                response=report,
+                latency_ms=float(report.get("latency_ms", 0.0)),
+            )
+            report["run_id"] = run["id"]
+            return report
         except Exception as exc:
             _raise_http_error("evaluate", exc)
 
     @app.post("/ablation")
     def ablation(request: AblationRequest) -> dict[str, Any]:
         try:
-            invalid = [variant for variant in request.variants if variant not in ALLOWED_ABLATION_VARIANTS]
-            if invalid:
-                allowed = ", ".join(sorted(ALLOWED_ABLATION_VARIANTS))
-                raise ValueError(f"Unsupported ablation variant(s): {', '.join(invalid)}. Allowed: {allowed}")
+            validate_variants(request.variants)
 
             corpus = Corpus.from_jsonl(_resolve_jsonl_path(request.corpus_path, must_exist=True))
             records = load_query_records(_resolve_jsonl_path(request.queries_path, must_exist=True))
             results: list[dict[str, Any]] = []
 
             for variant in request.variants:
-                strategy_factory, disable_query_graph = _ablation_controls(variant)
+                strategy_factory, disable_query_graph = variant_controls(variant)
                 report = evaluate_pipeline(
                     corpus,
                     records,
@@ -132,13 +233,100 @@ def create_app() -> Any:
                     }
                 )
 
-            return {"top_k": request.top_k, "query_count": len(records), "results": results}
+            report = {"top_k": request.top_k, "query_count": len(records), "results": results}
+            run = RUN_STORE.save_run(
+                run_type="ablation",
+                status="completed",
+                request=request.model_dump(),
+                response=report,
+                latency_ms=_mean(item["latency_ms"] for item in results),
+            )
+            report["run_id"] = run["id"]
+            return report
         except Exception as exc:
             _raise_http_error("ablation", exc)
+
+    @app.post("/claim-study")
+    def claim_study(request: ClaimStudyRequest) -> dict[str, Any]:
+        try:
+            report = _run_claim_study(request)
+            run = RUN_STORE.save_run(
+                run_type="claim_study",
+                status="completed",
+                request=request.model_dump(),
+                response=report,
+                latency_ms=float(_mean(item["summary"]["latency_ms"] for item in report["variants"])),
+            )
+            report["run_id"] = run["id"]
+            return report
+        except Exception as exc:
+            _raise_http_error("claim_study", exc)
+
+    @app.post("/jobs/evaluate")
+    def evaluate_job(request: EvaluateRequest) -> dict[str, Any]:
+        return JOB_MANAGER.submit(
+            job_type="evaluation",
+            request=request.model_dump(),
+            fn=lambda: _run_evaluation(request),
+        )
+
+    @app.post("/jobs/ablation")
+    def ablation_job(request: AblationRequest) -> dict[str, Any]:
+        return JOB_MANAGER.submit(
+            job_type="ablation",
+            request=request.model_dump(),
+            fn=lambda: _run_ablation(request),
+        )
+
+    @app.post("/jobs/claim-study")
+    def claim_study_job(request: ClaimStudyRequest) -> dict[str, Any]:
+        return JOB_MANAGER.submit(
+            job_type="claim_study",
+            request=request.model_dump(),
+            fn=lambda: _run_claim_study(request),
+        )
+
+    @app.post("/jobs/index")
+    def index_job(request: IndexRequest) -> dict[str, Any]:
+        return JOB_MANAGER.submit(
+            job_type="index",
+            request=request.model_dump(),
+            fn=lambda: _run_index(request),
+        )
+
+    @app.get("/jobs")
+    def list_jobs(limit: int = 25) -> dict[str, Any]:
+        return {"jobs": JOB_MANAGER.list(limit=limit)}
+
+    @app.get("/jobs/{job_id}")
+    def get_job(job_id: str) -> dict[str, Any]:
+        job = JOB_MANAGER.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job was not found.")
+        return job
+
+    @app.get("/runs")
+    def list_runs(limit: int = 25, run_type: str | None = None) -> dict[str, Any]:
+        return {"runs": RUN_STORE.list_runs(limit=limit, run_type=run_type)}
+
+    @app.get("/runs/{run_id}")
+    def get_run(run_id: str) -> dict[str, Any]:
+        run = RUN_STORE.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run was not found.")
+        return run
 
     @app.get("/corpora")
     def list_corpora() -> dict[str, Any]:
         return {"corpora": [*_list_corpora(EXAMPLES_DIR, "example"), *_list_corpora(DATA_DIR, "uploaded")]}
+
+    @app.get("/corpora/stats")
+    def corpus_stats(corpus_path: str = "data/arpo-openalex-corpus.jsonl") -> dict[str, Any]:
+        try:
+            corpus = Corpus.from_jsonl(_resolve_jsonl_path(corpus_path, must_exist=True))
+            return {"corpus_path": corpus_path, "quality": corpus_quality_report(corpus)}
+        except Exception as exc:
+            _raise_http_error("corpus_stats", exc)
 
     @app.get("/suggest")
     def suggest(
@@ -217,10 +405,23 @@ def create_app() -> Any:
             await file.close()
 
     app.get("/api/health", include_in_schema=False)(health)
+    app.get("/api/healthz", include_in_schema=False)(healthz)
+    app.get("/api/metrics", include_in_schema=False)(metrics)
     app.post("/api/search", include_in_schema=False)(search)
     app.post("/api/evaluate", include_in_schema=False)(evaluate)
     app.post("/api/ablation", include_in_schema=False)(ablation)
+    app.post("/api/claim-study", include_in_schema=False)(claim_study)
+    app.post("/api/research/claim-study", include_in_schema=False)(claim_study)
+    app.post("/api/jobs/evaluate", include_in_schema=False)(evaluate_job)
+    app.post("/api/jobs/ablation", include_in_schema=False)(ablation_job)
+    app.post("/api/jobs/claim-study", include_in_schema=False)(claim_study_job)
+    app.post("/api/jobs/index", include_in_schema=False)(index_job)
+    app.get("/api/jobs", include_in_schema=False)(list_jobs)
+    app.get("/api/jobs/{job_id}", include_in_schema=False)(get_job)
+    app.get("/api/runs", include_in_schema=False)(list_runs)
+    app.get("/api/runs/{run_id}", include_in_schema=False)(get_run)
     app.get("/api/corpora", include_in_schema=False)(list_corpora)
+    app.get("/api/corpora/stats", include_in_schema=False)(corpus_stats)
     app.get("/api/suggest", include_in_schema=False)(suggest)
     app.post("/api/corpora/upload", include_in_schema=False)(upload_corpus)
     app.post("/api/corpora/ingest", include_in_schema=False)(ingest_corpus)
@@ -231,95 +432,85 @@ def create_app() -> Any:
     return app
 
 
+def _run_evaluation(request: Any) -> dict[str, Any]:
+    corpus = Corpus.from_jsonl(_resolve_jsonl_path(request.corpus_path, must_exist=True))
+    records = load_query_records(_resolve_jsonl_path(request.queries_path, must_exist=True))
+    return evaluate_pipeline(corpus, records, top_k=request.top_k)
+
+
+def _run_ablation(request: Any) -> dict[str, Any]:
+    validate_variants(request.variants)
+
+    corpus = Corpus.from_jsonl(_resolve_jsonl_path(request.corpus_path, must_exist=True))
+    records = load_query_records(_resolve_jsonl_path(request.queries_path, must_exist=True))
+    results: list[dict[str, Any]] = []
+
+    for variant in request.variants:
+        strategy_factory, disable_query_graph = variant_controls(variant)
+        report = evaluate_pipeline(
+            corpus,
+            records,
+            top_k=request.top_k,
+            strategy_factory=strategy_factory,
+            disable_query_graph=disable_query_graph,
+        )
+        results.append(
+            {
+                "variant": ALLOWED_ABLATION_VARIANTS[variant],
+                "recall_at_k": report["recall_at_k"],
+                "ndcg_at_k": report["ndcg_at_k"],
+                "mrr": report["mrr"],
+                "latency_ms": report["latency_ms"],
+            }
+        )
+
+    return {"top_k": request.top_k, "query_count": len(records), "results": results}
+
+
+def _run_claim_study(request: Any) -> dict[str, Any]:
+    corpus_path = _resolve_jsonl_path(request.corpus_path, must_exist=True)
+    queries_path = _resolve_benchmark_path(request.queries_path, benchmark=request.benchmark)
+    output_dir = _resolve_output_dir(request.output_dir) if request.output_dir else None
+    corpus = Corpus.from_jsonl(corpus_path)
+    records, benchmark = load_benchmark_records(
+        queries_path,
+        benchmark=request.benchmark,
+        split=request.split,
+    )
+    return run_claim_study(
+        corpus,
+        records,
+        top_k=request.top_k,
+        variants=request.variants,
+        benchmark=benchmark,
+        artifact_dir=output_dir,
+        corpus_path=_public_path(corpus_path),
+        queries_path=_public_path(queries_path),
+    )
+
+
+def _run_index(request: Any) -> dict[str, Any]:
+    corpus_path = _resolve_jsonl_path(request.corpus_path, must_exist=True)
+    corpus = Corpus.from_jsonl(corpus_path)
+    backend = build_embedding_backend(request.backend, model_id=request.model_id)
+    index = PersistentVectorIndex.from_corpus(
+        corpus,
+        backend,
+        index_dir=request.index_dir or os.getenv("ARPO_VECTOR_INDEX_DIR"),
+    )
+    return {
+        "corpus_path": _public_path(corpus_path),
+        "documents": len(corpus),
+        "embedding_backend": index.backend_name,
+        "embedding_model": index.model_id,
+        "dimensions": index.dimensions,
+        "cache_hit": index.cache_hit,
+        "index_path": _public_path(index.index_path) if index.index_path else None,
+    }
+
+
 def _ablation_controls(variant: str) -> tuple[Any, bool]:
-    planner = RetrievalStrategyPlanner()
-
-    def planned(analysis: QueryAnalysis, top_k: int) -> RetrievalStrategy:
-        return planner.plan(analysis, top_k=top_k)
-
-    if variant == "full":
-        return planned, False
-
-    if variant == "no_pruning":
-        def no_pruning_strategy(analysis: QueryAnalysis, top_k: int) -> RetrievalStrategy:
-            strategy = planned(analysis, top_k)
-            return replace(
-                strategy,
-                strategy_id=f"{strategy.strategy_id}_no_pruning",
-                pruning_threshold=0.0,
-            )
-
-        return (
-            no_pruning_strategy,
-            False,
-        )
-
-    if variant == "no_query_graph":
-        def no_query_graph_strategy(analysis: QueryAnalysis, top_k: int) -> RetrievalStrategy:
-            return replace(
-                planned(analysis, top_k),
-                strategy_id="no_query_graph",
-                graph_weight=0.0,
-                max_hops=1,
-            )
-
-        return (
-            no_query_graph_strategy,
-            True,
-        )
-
-    if variant == "sparse_only":
-        return (
-            lambda analysis, top_k: RetrievalStrategy(
-                strategy_id="sparse_only",
-                sparse_weight=1.0,
-                dense_weight=0.0,
-                graph_weight=0.0,
-                top_k=top_k,
-                per_hop_k=max(top_k, 8),
-                max_hops=1,
-                pruning_threshold=0.0,
-                diversity_lambda=0.0,
-                reranking_mode="precision",
-            ),
-            True,
-        )
-
-    if variant == "dense_only":
-        return (
-            lambda analysis, top_k: RetrievalStrategy(
-                strategy_id="dense_only",
-                sparse_weight=0.0,
-                dense_weight=1.0,
-                graph_weight=0.0,
-                top_k=top_k,
-                per_hop_k=max(top_k, 8),
-                max_hops=1,
-                pruning_threshold=0.0,
-                diversity_lambda=0.0,
-                reranking_mode="semantic",
-            ),
-            True,
-        )
-
-    if variant == "fixed_hybrid":
-        return (
-            lambda analysis, top_k: RetrievalStrategy(
-                strategy_id="fixed_hybrid",
-                sparse_weight=0.5,
-                dense_weight=0.5,
-                graph_weight=0.0,
-                top_k=top_k,
-                per_hop_k=max(top_k + 2, 8),
-                max_hops=1,
-                pruning_threshold=0.4,
-                diversity_lambda=0.2,
-                reranking_mode="fixed",
-            ),
-            False,
-        )
-
-    raise ValueError(f"Unsupported ablation variant: {variant}")
+    return variant_controls(variant)
 
 
 def _cors_origins() -> list[str]:
@@ -327,6 +518,70 @@ def _cors_origins() -> list[str]:
     if raw:
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
     return ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def _is_authorized(request: Any) -> bool:
+    if not API_KEYS:
+        return True
+
+    path = request.url.path
+    if request.method == "OPTIONS" or path in PUBLIC_API_PATHS:
+        return True
+    protected_prefixes = (
+        "/api/",
+        "/search",
+        "/evaluate",
+        "/ablation",
+        "/claim-study",
+        "/research",
+        "/corpora",
+        "/suggest",
+        "/jobs",
+        "/runs",
+        "/metrics",
+    )
+    if not path.startswith(protected_prefixes):
+        return True
+
+    provided = request.headers.get("x-api-key") or _bearer_token(request.headers.get("authorization", ""))
+    return provided in API_KEYS
+
+
+def _bearer_token(value: str) -> str:
+    prefix = "bearer "
+    return value[len(prefix):].strip() if value.lower().startswith(prefix) else ""
+
+
+def _rate_limit_allows(request: Any) -> bool:
+    if RATE_LIMIT_PER_MINUTE <= 0:
+        return True
+
+    path = request.url.path
+    if path in PUBLIC_API_PATHS:
+        return True
+
+    client = request.client.host if request.client else "unknown"
+    key = f"{client}:{path}"
+    now = time()
+    window_start = now - 60
+
+    with RATE_LIMIT_LOCK:
+        bucket = [timestamp for timestamp in RATE_LIMIT_BUCKETS.get(key, []) if timestamp >= window_start]
+        if len(bucket) >= RATE_LIMIT_PER_MINUTE:
+            RATE_LIMIT_BUCKETS[key] = bucket
+            return False
+        bucket.append(now)
+        RATE_LIMIT_BUCKETS[key] = bucket
+        return True
+
+
+def _mean(values: Any) -> float:
+    values = list(values)
+    return sum(values) / len(values) if values else 0.0
+
+
+def _elapsed_ms(start: float) -> float:
+    return round((perf_counter() - start) * 1000, 3)
 
 
 def _resolve_jsonl_path(path_value: str, *, must_exist: bool) -> Path:
@@ -342,6 +597,39 @@ def _resolve_jsonl_path(path_value: str, *, must_exist: bool) -> Path:
 
     if must_exist and not resolved.is_file():
         raise FileNotFoundError("Requested JSONL file was not found.")
+
+    return resolved
+
+
+def _resolve_benchmark_path(path_value: str, *, benchmark: str) -> Path:
+    raw_path = Path(path_value)
+    candidate = raw_path if raw_path.is_absolute() else WORKSPACE_ROOT / raw_path
+    resolved = candidate.resolve()
+
+    if not any(_is_relative_to(resolved, root) for root in (EXAMPLES_DIR, DATA_DIR)):
+        raise ValueError("Benchmark path must be inside the configured examples or data directory.")
+
+    if benchmark == "beir" or resolved.is_dir():
+        if not resolved.is_dir():
+            raise FileNotFoundError("Requested BEIR benchmark directory was not found.")
+        return resolved
+
+    if resolved.suffix.lower() not in {".jsonl", ".json"}:
+        raise ValueError("Benchmark query files must be .jsonl or .json unless using BEIR directories.")
+
+    if not resolved.is_file():
+        raise FileNotFoundError("Requested benchmark query file was not found.")
+
+    return resolved
+
+
+def _resolve_output_dir(path_value: str) -> Path:
+    raw_path = Path(path_value)
+    candidate = raw_path if raw_path.is_absolute() else WORKSPACE_ROOT / raw_path
+    resolved = candidate.resolve()
+
+    if not _is_relative_to(resolved, DATA_DIR):
+        raise ValueError("Experiment output directory must be inside the configured data directory.")
 
     return resolved
 

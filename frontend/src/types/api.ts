@@ -144,6 +144,63 @@ export const AblationReportSchema = z.object({
   results: z.array(AblationVariantSchema)
 });
 
+export const ClaimStudyVariantSchema = z.object({
+  variant_key: z.string(),
+  variant: z.string(),
+  summary: z.record(z.string(), z.any()),
+  diagnostics: z.record(z.string(), z.any())
+});
+
+export const ClaimStudyComparisonSchema = z.object({
+  primary_key: z.string(),
+  primary: z.string(),
+  baseline_key: z.string(),
+  baseline: z.string(),
+  delta: z.record(z.string(), z.number()),
+  relative_delta: z.record(z.string(), z.number()),
+  paired_significance: z.record(z.string(), z.any())
+});
+
+export const ClaimStudyVerdictSchema = z.object({
+  claim: z.string(),
+  status: z.string(),
+  evidence: z.string()
+});
+
+export const ClaimStudyFailureSchema = z.object({
+  query_id: z.string(),
+  query: z.string(),
+  query_type: z.string(),
+  failure_type: z.string(),
+  precision_at_k: z.number(),
+  recall_at_k: z.number(),
+  ndcg_at_k: z.number(),
+  mrr: z.number(),
+  ranking: z.array(z.string()),
+  diagnostic_hint: z.string()
+});
+
+export const ClaimStudyReportSchema = z.object({
+  study_id: z.string(),
+  created_at: z.string(),
+  corpus_path: z.string().nullable().optional(),
+  queries_path: z.string().nullable().optional(),
+  top_k: z.number(),
+  primary_variant: z.object({
+    key: z.string(),
+    label: z.string()
+  }),
+  benchmark: z.record(z.string(), z.any()),
+  metrics: z.array(z.string()),
+  variants: z.array(ClaimStudyVariantSchema),
+  comparisons: z.array(ClaimStudyComparisonSchema),
+  slices: z.array(z.record(z.string(), z.any())),
+  failure_analysis: z.array(ClaimStudyFailureSchema),
+  claim_verdicts: z.array(ClaimStudyVerdictSchema),
+  artifacts: z.record(z.string(), z.string()).optional(),
+  run_id: z.string().optional()
+}).catchall(z.any());
+
 export const QuerySuggestionSchema = z.object({
   text: z.string(),
   kind: z.string(),
@@ -167,11 +224,51 @@ export const CorporaResponseSchema = z.object({
   corpora: z.array(CorpusInfoSchema)
 });
 
+export const RunRecordSchema = z.object({
+  id: z.string(),
+  run_type: z.string(),
+  status: z.string(),
+  request: z.record(z.string(), z.any()),
+  response: z.record(z.string(), z.any()).nullable(),
+  error: z.string().nullable(),
+  latency_ms: z.number().nullable(),
+  created_at: z.string(),
+  updated_at: z.string()
+});
+
+export const RunsResponseSchema = z.object({
+  runs: z.array(RunRecordSchema)
+});
+
+export const JobRecordSchema = z.object({
+  id: z.string(),
+  job_type: z.string(),
+  status: z.string(),
+  request: z.record(z.string(), z.any()),
+  created_at: z.string(),
+  updated_at: z.string(),
+  result: z.record(z.string(), z.any()).nullable(),
+  error: z.string().nullable(),
+  latency_ms: z.number().nullable(),
+  run_id: z.string().nullable()
+});
+
+export const JobsResponseSchema = z.object({
+  jobs: z.array(JobRecordSchema)
+});
+
 export type EvaluationQueryReport = z.infer<typeof EvaluationQueryReportSchema>;
 export type EvaluationReport = z.infer<typeof EvaluationReportSchema>;
 export type AblationVariant = z.infer<typeof AblationVariantSchema>;
 export type AblationReport = z.infer<typeof AblationReportSchema>;
+export type ClaimStudyReport = z.infer<typeof ClaimStudyReportSchema>;
+export type ClaimStudyVerdict = z.infer<typeof ClaimStudyVerdictSchema>;
+export type ClaimStudyComparison = z.infer<typeof ClaimStudyComparisonSchema>;
 export type QuerySuggestion = z.infer<typeof QuerySuggestionSchema>;
 export type QuerySuggestionsResponse = z.infer<typeof QuerySuggestionsResponseSchema>;
 export type CorpusInfo = z.infer<typeof CorpusInfoSchema>;
 export type CorporaResponse = z.infer<typeof CorporaResponseSchema>;
+export type RunRecord = z.infer<typeof RunRecordSchema>;
+export type RunsResponse = z.infer<typeof RunsResponseSchema>;
+export type JobRecord = z.infer<typeof JobRecordSchema>;
+export type JobsResponse = z.infer<typeof JobsResponseSchema>;
